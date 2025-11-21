@@ -6,7 +6,7 @@ from config.settings import LOG_DIR
 def get_logger(name: str = "news_pipeline", save_time_logs: bool = True) -> logging.Logger:
     """
     Create a logger. If save_time_logs=True -> rotate daily.
-    If False -> single static log file with no rotation.need """
+    If False -> single static log file with no rotation need """
     logger = logging.getLogger(name)
 
     if logger.handlers:
