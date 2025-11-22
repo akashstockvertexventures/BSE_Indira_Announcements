@@ -22,7 +22,7 @@ FREEZE_TIMEOUT = int(os.getenv("FREEZE_TIMEOUT", 60))
 RESTART_DELAY = int(os.getenv("RESTART_DELAY", 30))
 
 BAT_FILE_PATH = os.getenv("BAT_FILE_PATH", r"D:/Completed_Codes/NewsImpactDashboard\AutoMatic_Run.bat")
-BAT_TRIGGER_TIME = os.getenv("BAT_TRIGGER_TIME", "14:50") 
+BAT_TRIGGER_TIME = os.getenv("BAT_TRIGGER_TIME", "14:59") 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 LOG_DIR = BASE_DIR / "logs"
