@@ -3,7 +3,7 @@ import torch
 SOURCE_LIVESQUACK = "Livesquack"
 SOURCE_BSE = "BSE"
 
-CAT_NO_CHECK_DUPLICATE_LIVESQUACK = [
+CAT_NEWS_REMOVE_LIVESQUACK = [
     "Financial Results", "Broker Report"
 ]
 

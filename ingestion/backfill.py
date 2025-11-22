@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
 from core.base import Base
-from config.constants import SOURCE_BSE, SOURCE_LIVESQUACK, SAFE_QUERY, CAT_NO_CHECK_DUPLICATE_LIVESQUACK
+from config.constants import SOURCE_BSE, SOURCE_LIVESQUACK, SAFE_QUERY, CAT_NEWS_REMOVE_LIVESQUACK
 
 class BackfillWatcher(Base):
     def __init__(self):
@@ -19,7 +19,7 @@ class BackfillWatcher(Base):
         if source == SOURCE_LIVESQUACK:
             return {
                 **base,
-                "category": {"$type": "string", "$nin": ["", *CAT_NO_CHECK_DUPLICATE_LIVESQUACK]},
+                "category": {"$type": "string", "$nin": ["", *CAT_NEWS_REMOVE_LIVESQUACK]},
                 "short summary": SAFE_QUERY,
                 "impact score": {"$gt": 0},
             }

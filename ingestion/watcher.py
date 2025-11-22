@@ -1,6 +1,6 @@
 import asyncio
 from core.base import Base
-from config.constants import SOURCE_BSE, SOURCE_LIVESQUACK, SAFE_QUERY,CAT_NO_CHECK_DUPLICATE_LIVESQUACK
+from config.constants import SOURCE_BSE, SOURCE_LIVESQUACK, SAFE_QUERY, CAT_NEWS_REMOVE_LIVESQUACK
 
 class NewsWatcher(Base):
     def __init__(self):
@@ -19,7 +19,7 @@ class NewsWatcher(Base):
         if source == SOURCE_LIVESQUACK:
             match = {
                 **base,
-                "fullDocument.category": {"$type": "string", "$nin": ["", *CAT_NO_CHECK_DUPLICATE_LIVESQUACK]},
+                "fullDocument.category": {"$type": "string", "$nin": ["", *CAT_NEWS_REMOVE_LIVESQUACK]},
                 "fullDocument.short summary": SAFE_QUERY,
                 "fullDocument.impact score": {"$gt": 0},
             }
