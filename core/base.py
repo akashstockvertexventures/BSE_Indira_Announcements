@@ -4,14 +4,15 @@ from core.resources import SharedResources
 from core.logger import get_logger
 
 class Base:
-    def __init__(self, name = "news_pipeline"):
-        self.logger = get_logger(name=name)
+    def __init__(self, name = "news_pipeline", save_time_logs = True):
+        self.logger = get_logger(name=name, save_time_logs=save_time_logs)
         self.mongo = SharedResources.get_mongo_client()
         self.db = self.mongo[DB_NAME]
         self.collection_master = self.mongo[ODIN_DB][COLLECTION_MASTER]
         self.collection_squack = self.db[COLLECTION_SQUACK]
         self.collection_bse = self.db[COLLECTION_BSE]
         self.collection_dashboard = self.db[COLLECTION_DASHBOARD]
+        self.collection_archive_dashboard= self.db[COLLECTION_DASHBOARD_ARCHIVE]
         self.collection_metadata_updates = self.db[COLLECTION_METADATA_UPDATES]
         self.llm_usage_collection = self.db[COLLECTION_LLM_USAGE]
         self.collection_symbolmap_embeddings = self.db[COLLECTION_SYMBOLMAP_EMBEDDINGS]

@@ -7,6 +7,8 @@ CAT_NEWS_REMOVE_LIVESQUACK = [
     "Financial Results", "Broker Report"
 ]
 
+NO_OF_ARCHIVE_DAYS = 10
+
 CAT_NO_CHECK_DUPLICATE_DASHBOARD = [
     "Investor Presentation", "Earnings Call Transcript", "Broker Report"
 ]

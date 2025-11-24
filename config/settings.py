@@ -25,7 +25,7 @@ COLLECTION_DASHBOARD = os.getenv("collection_dashboard")
 COLLECTION_METADATA_UPDATES = os.getenv("collection_metadata_updates")
 COLLECTION_LLM_USAGE = os.getenv("collection_llm_usage")
 COLLECTION_SYMBOLMAP_EMBEDDINGS = os.getenv("collection_symbolmap_embed")
-
+COLLECTION_DASHBOARD_ARCHIVE = os.getenv("collection_dashbaord_archive")
 
 
 # Tuning
