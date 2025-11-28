@@ -88,35 +88,40 @@ class ProcessNewsDuplicator(Base):
         return {company: duplicate_ids}
 
     async def process_duplicates(self, company_list=None):
-        companies = company_list or []
-        if not companies:
-            return
+        try:
+            companies = company_list or []
+            if not companies:
+                return
 
-        grouped_docs = await self.load_dashboard_docs_for_companies(companies)
-        if not grouped_docs:
-            self.logger.info("%s - No documents found for deduplication", self.__class__.__name__)
-            return
+            grouped_docs = await self.load_dashboard_docs_for_companies(companies)
+            if not grouped_docs:
+                self.logger.info("%s -ProcessNewsDuplicator No documents found for deduplication", self.__class__.__name__)
+                return
 
-        tasks = [asyncio.to_thread(self._find_duplicate_ids_one_company, doc_list, self.threshold) for doc_list in grouped_docs.values()]
-        results = await asyncio.gather(*tasks)
+            tasks = [asyncio.to_thread(self._find_duplicate_ids_one_company, doc_list, self.threshold) for doc_list in grouped_docs.values()]
+            results = await asyncio.gather(*tasks)
 
-        company_duplicate_counts = Counter()
-        all_duplicate_ids = set()
-        for result_dict in results:
-            for company, dup_ids in result_dict.items():
-                count = len(dup_ids)
-                if count > 0:
-                    company_duplicate_counts[company] += count
-                    all_duplicate_ids.update(dup_ids)
+            company_duplicate_counts = Counter()
+            all_duplicate_ids = set()
+            for result_dict in results:
+                for company, dup_ids in result_dict.items():
+                    count = len(dup_ids)
+                    if count > 0:
+                        company_duplicate_counts[company] += count
+                        all_duplicate_ids.update(dup_ids)
 
-        if not all_duplicate_ids:
-            self.logger.info("%s - Deduplication complete — No duplicates found", self.__class__.__name__)
-            return
+            if not all_duplicate_ids:
+                self.logger.info("%s -ProcessNewsDuplicator Deduplication complete — No duplicates found", self.__class__.__name__)
+                return
 
-        result = await self.collection_dashboard.update_many(
-            {"_id": {"$in": [ObjectId(oid) for oid in all_duplicate_ids]}, "duplicate": False},
-            {"$set": {"duplicate": True}}
-        )
-        self.logger.info("%s - Deduplication complete — Total: %d marked (modified: %d)", self.__class__.__name__, len(all_duplicate_ids), result.modified_count)
-        for company, count in company_duplicate_counts.most_common():
-            self.logger.info("%s - └→ %s: %d duplicates marked", self.__class__.__name__, company, count)
+            result = await self.collection_dashboard.update_many(
+                {"_id": {"$in": [ObjectId(oid) for oid in all_duplicate_ids]}, "duplicate": False},
+                {"$set": {"duplicate": True}}
+            )
+            self.logger.info("%s - ProcessNewsDuplicator Deduplication complete — Total: %d marked (modified: %d)", self.__class__.__name__, len(all_duplicate_ids), result.modified_count)
+            for company, count in company_duplicate_counts.most_common():
+                self.logger.info("%s - └→ %s: %d duplicates marked", self.__class__.__name__, company, count)
+            
+        except Exception as exc:
+            self.logger.error("[ProcessNewsDuplicator] Error : %s", exc, exc_info=True)
+            return []

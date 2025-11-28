@@ -35,16 +35,16 @@ class Formatter(Base):
             symbolmap = d.get("symbolmap")
             stock = self._extract_stock(symbolmap)
             if not stock:
-                self.logger.info("skip doc no stock | news_id=%s", d.get("news_id"))
+                self.logger.info("Formatter skip doc no stock | news_id=%s", d.get("news_id"))
                 continue
 
             try:
                 dt_tm = pd.to_datetime(d.get("dt_tm"))
                 if pd.isna(dt_tm):
-                    self.logger.info("skip doc invalid dt_tm | news_id=%s", d.get("news_id"))
+                    self.logger.info("Formatter skip doc invalid dt_tm | news_id=%s", d.get("news_id"))
                     continue
             except Exception:
-                self.logger.info("skip doc parse dt_tm failed | news_id=%s", d.get("news_id"))
+                self.logger.info("Formatter skip doc parse dt_tm failed | news_id=%s", d.get("news_id"))
                 continue
 
             d["stock"] = stock
