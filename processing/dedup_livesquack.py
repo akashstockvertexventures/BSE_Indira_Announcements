@@ -46,6 +46,10 @@ class LiveSquackNewsDuplicator(Base):
         for doc, score, idx in zip(incoming_docs, max_scores.tolist(), max_indices.tolist()):
             if score < self.embedding_text_threshold:
                 unique_docs.append(doc)
+                self.logger.info(
+                    f"[{company}] UNIQUE 🆕 | news_id={doc.get('news_id')} | "
+                    f"similarity={score:.4f} < threshold={self.embedding_text_threshold}"
+                )
             else:
                 m = dash_docs[idx]
                 duplicates.append({
@@ -56,6 +60,11 @@ class LiveSquackNewsDuplicator(Base):
                     "matched_summary": m.get("short summary", ""),
                     "score": round(score, 5)
                 })
+                self.logger.info(
+                    f"[{company}] DUPLICATE ✅ | incoming={doc.get('news_id')} "
+                    f"matched_with={m.get('news_id')} | similarity={score:.4f} "
+                    f"(≥ threshold={self.embedding_text_threshold})"
+                )
         return unique_docs, duplicates
 
     async def filter_unique_news(self, docs):

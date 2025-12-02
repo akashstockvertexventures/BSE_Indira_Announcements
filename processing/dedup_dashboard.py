@@ -85,6 +85,26 @@ class ProcessNewsDuplicator(Base):
                 if i != earliest_idx:
                     duplicate_ids.add(ids[i])
 
+        try:
+            latest_idx = max(range(n), key=lambda i: dts[i])
+            latest_id = ids[latest_idx]
+            latest_emb = embeddings[latest_idx].reshape(1, -1)
+            scores_latest, indices_latest = index.search(latest_emb, n)
+            most_similar_idx = indices_latest[0][1]
+            most_similar_score = float(scores_latest[0][1])
+            is_duplicate = latest_id in duplicate_ids
+            self.logger.info(
+                f"[{company}] Latest doc {latest_id} (dt={dts[latest_idx]}) "
+                f"is most similar to {ids[most_similar_idx]} (dt={dts[most_similar_idx]}) "
+                f"with similarity={most_similar_score:.4f} | "
+                f"{'DUPLICATE ✅' if is_duplicate else 'UNIQUE 🆕'}"
+            )
+
+        except Exception as e:
+            self.logger.warning(
+                f"[{company}] ⚠️ Failed to log similarity for latest doc: {e}"
+            )
+
         return {company: duplicate_ids}
 
     async def process_duplicates(self, company_list=None):
