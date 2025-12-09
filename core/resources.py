@@ -1,33 +1,29 @@
-from sentence_transformers import SentenceTransformer
+import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import MongoClient
 from config.settings import MONGO_URI
-from config.constants import DEVICE
 from core.logger import get_logger
 
-logger = get_logger()
 
 class SharedResources:
-    _mongo_client = None
-    _embedding_model = None
+    """Centralized shared MongoDB resource manager."""
 
+    _mongo_client = None
+    _async_mongo_client = None
+    _logger = get_logger("news_pipeline")
+
+    # --- Sync Mongo Client ---
     @classmethod
     def get_mongo_client(cls):
         if cls._mongo_client is None:
-            cls._mongo_client = AsyncIOMotorClient(MONGO_URI)
-            logger.info("Mongo client created")
+            cls._logger.info(f"🧩 Initializing MongoDB client: {MONGO_URI}")
+            cls._mongo_client = MongoClient(MONGO_URI)
         return cls._mongo_client
 
+    # --- Async Mongo Client ---
     @classmethod
-    def get_embedding_model(cls):
-        if cls._embedding_model is None:
-            try:
-                model = SentenceTransformer("BAAI/bge-large-en-v1.5", device=DEVICE)
-                model.max_seq_length = 512
-                # warmup
-                model.encode(["warm up"], convert_to_tensor=False, normalize_embeddings=True)
-                cls._embedding_model = model
-                logger.info("Embedding model loaded and warmed up")
-            except Exception as exc:
-                logger.exception("Failed to load embedding model: %s", exc)
-                raise
-        return cls._embedding_model
+    def get_async_mongo_client(cls):
+        if cls._async_mongo_client is None:
+            cls._logger.info(f"⚙️ Initializing Async MongoDB client: {MONGO_URI}")
+            cls._async_mongo_client = AsyncIOMotorClient(MONGO_URI)
+        return cls._async_mongo_client

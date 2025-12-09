@@ -1,18 +1,19 @@
-import torch
+from datetime import datetime
 
-SOURCE_LIVESQUACK = "Livesquack"
-SOURCE_BSE = "BSE"
+BSE_INDIRA_HIST_MIN_DATE = datetime(2023, 11, 1)   # 1st Nov 2023
+BSE_INDIRA_HIST_MAX_DATE = datetime(2025, 10, 31)  # 31st Oct 2025
 
-CAT_NEWS_REMOVE_LIVESQUACK = [
-    "Financial Results", "Broker Report"
-]
+COMPANY_SYMBOL_MAP_QUERY = {
+            "bsecode": {"$ne": None},
+            "mcap": {"$gt": 0},
+            "isin": {"$not": {"$regex": "IN9"}},
+            "companyname": {"$not": {"$regex": "(?i)partly\\s?paid"}},
+        }
 
-NO_OF_ARCHIVE_DAYS = 10
-
-CAT_NO_CHECK_DUPLICATE_DASHBOARD = [
-    "Investor Presentation", "Earnings Call Transcript", "Broker Report"
-]
-
-SAFE_QUERY = {"$type": "string", "$nin": ["", " "]}
-
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+CATEGORY_MAP = {
+            "Investor Presentation": {"HeadLine": r"presentation", "NewsBody": None},
+            "Annual Report": {"HeadLine": r"annual report", "NewsBody": None},
+            "Credit Rating": {"HeadLine": r"credit rating", "NewsBody": None},
+            "Earnings Call Transcript": {"HeadLine": r"earnings call|conference call|transcript","NewsBody": r"concall"}
+            }
+LEN_PANDAS_MIN_DOCS = 10
