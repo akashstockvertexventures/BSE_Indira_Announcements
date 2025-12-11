@@ -184,18 +184,13 @@ class BSECorpAnnouncementClient:
                 self.logger.info(f"lastnews_dt_tm before window → adjusted to {window_start.date()}")
                 last_dt = window_start
             elif last_dt > today:
-                self.logger.info(f"lastnews_dt_tm beyond today → adjusted to {today.date()}")
-                last_dt = today
-
-        # --- Decide mode: single day vs range ---
-        if last_dt == today:
-            self.logger.info(f"Fetching live data for {today.date()} (single-day mode)")
-            async with aiohttp.ClientSession(headers=self.headers) as session:
-                sem = asyncio.Semaphore(self.semaphore_limit)
-                payload = self._ensure_payload_fields(BSE_INDIRA_API_PARAMS_Live.copy(), today)
-                _, data = await self._fetch_for_date(session, payload, sem)
-                self.logger.info(f"📆 {today.date()} → {len(data)} records (live)")
-                return data or []
+                self.logger.info(f"Fetching live data for {last_dt} (single-day mode)")
+                async with aiohttp.ClientSession(headers=self.headers) as session:
+                    sem = asyncio.Semaphore(self.semaphore_limit)
+                    payload = self._ensure_payload_fields(BSE_INDIRA_API_PARAMS_Live.copy(), last_dt)
+                    _, data = await self._fetch_for_date(session, payload, sem)
+                    self.logger.info(f"📆 {last_dt} → {len(data)} records (live)")
+                    return data or []
 
         # --- Multi-day mode ---
         self.logger.info(f"Fetching live range: {last_dt.date()} → {today.date()}")
@@ -208,7 +203,6 @@ class BSECorpAnnouncementClient:
                 for d in (last_dt + timedelta(days=i) for i in range((today - last_dt).days + 1))
             ]
 
-            # Run concurrent API calls
             tasks = [asyncio.create_task(self._fetch_for_date(session, p, sem)) for p in date_range]
             results = []
             for coro in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="📡 Fetching Live Data"):

@@ -10,7 +10,7 @@ class SharedResources:
 
     _mongo_client = None
     _async_mongo_client = None
-    _logger = get_logger("news_pipeline")
+    _logger = get_logger()
 
     # --- Sync Mongo Client ---
     @classmethod
