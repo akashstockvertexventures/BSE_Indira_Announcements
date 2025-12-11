@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 from config.constants import RUN_INTERVAL_TIME_MIN
 from core.logger import get_logger
 from processes.bse_corp_ann_api import BSECorpAnnouncementClient
