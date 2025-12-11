@@ -5,7 +5,7 @@ from core.logger import get_logger
 from processes.bse_corp_ann_api import BSECorpAnnouncementClient
 from utils.categorize_with_filter import FilterCategorize
 from utils.reports_divider import ReportsDivider
-
+import aiohttp
 
 class BSEAnnouncementPipeline:
     def __init__(self):
@@ -43,13 +43,15 @@ class BSEAnnouncementPipeline:
             self.logger.error(f"❌ Pipeline failed during processing: {e}", exc_info=False)
 
     async def run_pipeline(self):
-        # await self.fetch_and_process(fetch_type="hist", from_date=datetime(2025, 9, 1), to_date=datetime(2025, 9, 10))
+        # await self.is_internet()
+        # await self.fetch_and_process(fetch_type="hist", from_date=datetime(2023, 11, 1), to_date=datetime(2025, 10, 31))
         interval_minutes = RUN_INTERVAL_TIME_MIN or 1
         self.logger.info(f"🚀 Starting BSE Live Announcements Pipeline | Interval: {interval_minutes} min")
         lastnews_dt_tm = None
         iteration = 0
 
         while True:
+            await self.is_internet()
             iteration += 1
             self.logger.info("=" * 70)
             self.logger.info(f"⏱️ Iteration {iteration}")
@@ -69,8 +71,24 @@ class BSEAnnouncementPipeline:
             lastnews_dt_tm = run_start_time
             self.logger.info(f"✅ Next fetch will use: {lastnews_dt_tm.strftime('%d/%m/%Y %H:%M:00')}")
             self.logger.info(f"💤 Sleeping for {interval_minutes} minutes...\n")
-
             await asyncio.sleep(interval_minutes * 60)
+            
+
+    async def is_internet(self) -> bool:
+        test_url = "https://www.google.com/generate_204"
+        while True:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(test_url, timeout=5) as resp:
+                        if resp.status == 204:
+                            return True
+                        else:
+                            self.logger.warning("⚠ Captive portal detected or unexpected response.")
+            except Exception:
+                self.logger.warning("❌ No internet connection detected.")
+            
+            self.logger.info("💤 Retrying internet check in 15 min ...\n")
+            await asyncio.sleep(15*60)
 
 
 if __name__ == "__main__":
