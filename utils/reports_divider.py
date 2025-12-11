@@ -1,8 +1,6 @@
-from typing import Dict, Any, List
 from datetime import datetime
 from core.base import Base
 import pandas as pd
-import asyncio
 from config.constants import CATEGORY_MAP, LEN_PANDAS_MIN_DOCS
 
 class ReportsDivider(Base):
@@ -125,7 +123,7 @@ class ReportsDivider(Base):
             self.logger.error(f"❌ format_category_docs error for {category}: {e}")
             return []
         
-    async def process_and_distribute_reports(self, docs):
+    async def divide_and_insert_docs(self, docs):
         try:
             if not docs:
                 self.logger.info("No docs found for reports_divider")

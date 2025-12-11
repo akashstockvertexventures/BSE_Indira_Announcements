@@ -7,7 +7,7 @@ from config.constants import CATEGORY_MAP, LEN_PANDAS_MIN_DOCS
 
 class FilterCategorize(Base):
     def __init__(self):
-        super().__init__(name="bse_formator", save_time_logs=True)
+        super().__init__(name="categorize_with_filter", save_time_logs=True)
 
         self.company_dict = self.fetch_load_symbolmap()
         if not self.company_dict:

@@ -7,7 +7,7 @@ from core.logger import get_logger
 class Base:
     """Hybrid Base class: sync for master, async for main DB."""
 
-    def __init__(self, name="bse_indira_pipeline", save_time_logs=True):
+    def __init__(self, name="bse_pipeline", save_time_logs=True):
         self.logger = get_logger(name=name, save_time_logs=save_time_logs)
 
         self.mongo = SharedResources.get_mongo_client()

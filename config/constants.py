@@ -41,7 +41,7 @@ CATEGORY_MAP = {
 }
 
 
-
+RUN_INTERVAL_TIME_MIN = 1 
 LEN_PANDAS_MIN_DOCS = 10
 BASE_DIR = Path(__file__).resolve().parent.parent
 LOG_DIR = BASE_DIR / "logs"
