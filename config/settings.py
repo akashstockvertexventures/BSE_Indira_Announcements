@@ -14,7 +14,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_RETENTION_DAYS = int(os.getenv("LOG_RETENTION_DAYS", 7))
 
 # === Mongo / Database ===
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+MONGO_URI = os.getenv("MONGO_URI")
 DB_NAME = os.getenv("DB_NAME", "BSECorpReports")
 ODIN_DB = os.getenv("ODIN_DB", "OdinMasterData")
 

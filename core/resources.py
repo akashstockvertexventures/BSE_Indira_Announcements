@@ -16,7 +16,7 @@ class SharedResources:
     @classmethod
     def get_mongo_client(cls):
         if cls._mongo_client is None:
-            cls._logger.info(f"🧩 Initializing MongoDB client: {MONGO_URI}")
+            cls._logger.info(f"🧩 Initializing MongoDB client")
             cls._mongo_client = MongoClient(MONGO_URI)
         return cls._mongo_client
 
@@ -24,6 +24,6 @@ class SharedResources:
     @classmethod
     def get_async_mongo_client(cls):
         if cls._async_mongo_client is None:
-            cls._logger.info(f"⚙️ Initializing Async MongoDB client: {MONGO_URI}")
+            cls._logger.info(f"⚙️ Initializing Async MongoDB client")
             cls._async_mongo_client = AsyncIOMotorClient(MONGO_URI)
         return cls._async_mongo_client

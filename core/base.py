@@ -49,11 +49,10 @@ class Base:
                     "NSE": nse,
                     "BSE": int(bse),
                     "Company_Name": name,
-                    "SELECTED": nse if nse else bse,
+                    "SELECTED": nse if nse else int(bse)
                 }
             except Exception:
                 continue
 
-        self.company_dict = company_dict
         self.logger.info(f"✅ Company master loaded: {len(company_dict)} companies.")
         return company_dict
