@@ -8,7 +8,7 @@ from config.constants import (
     BSE_INDIRA_TIMEOUT_SEC,
     BSE_INDIRA_RETRY_DELAY_SEC,
     BSE_INDIRA_CONCURRENCY_LIMIT,
-    BSE_INDIRA_RETRY_FETCH,
+    BSE_INDIRA_RETRY_COUNT,
     BSE_INDIRA_LIVE_DATA_DAYS
 )
 from config.settings import BSE_INDIRA_API_URL, BSE_INDIRA_API_PARAMS_Live, BSE_INDIRA_API_PARAMS_Hist
@@ -47,7 +47,7 @@ class BSECorpAnnouncementClient:
         self.timeout_sec = BSE_INDIRA_TIMEOUT_SEC
         self.retry_delay_sec = BSE_INDIRA_RETRY_DELAY_SEC
         self.semaphore_limit = BSE_INDIRA_CONCURRENCY_LIMIT
-        self.retry_count = BSE_INDIRA_RETRY_FETCH
+        self.retry_count = BSE_INDIRA_RETRY_COUNT
         self.no_of_live_days = BSE_INDIRA_LIVE_DATA_DAYS - 1
 
         if not BSE_INDIRA_API_URL:
@@ -120,7 +120,6 @@ class BSECorpAnnouncementClient:
 
     # ------------------ HISTORICAL FETCH ------------------
     async def fetch_hist_announcements(self, from_date=None, to_date=None):
-        # ✅ Using your preferred range validation logic
         from_dt = from_date or self.bseapi_hist_mindate
         to_dt = to_date or self.bseapi_hist_maxdate
 

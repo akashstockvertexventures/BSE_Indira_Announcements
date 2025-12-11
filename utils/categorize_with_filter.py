@@ -19,71 +19,92 @@ class FilterCategorize(Base):
             f"✅ Initialized Formator | symbolmap: {len(self.company_dict) if self.company_dict else 0}"
         )
 
+    async def fetch_existing_news_ids(self):
+        existing_news_ids = await self.collection_all_ann.distinct("news_id")
+        return existing_news_ids
+
     # =========================================================
     # ---------------- FOR LOOP HELPER ------------------------
     # =========================================================
-    def helper_forloop(self, data):
-        filtered = []
-        for rec in data:
+    async def helper_forloop(self, docs, existing_news_ids=[]):
+        filtered, existing_ids = [], set(existing_news_ids)
+
+        for rec in docs:
             try:
+                attach = str(rec.get("AttachmentName", "")).strip()
+                if not attach.endswith(".pdf"):
+                    continue
+
+                news_id = attach.replace(".pdf", "")
+                if news_id in existing_ids:
+                    continue
+
                 bse_cd = str(rec.get("SCRIP_CD", "")).strip()
                 if bse_cd not in self.company_dict:
                     continue
-                rec["symbolmap"] = self.company_dict[bse_cd]
+
+                info = self.company_dict[bse_cd]
+                rec["symbolmap"] = info.get("symbolmap")
+                rec["company"] = info.get("company")
+                rec["news_id"] = news_id
 
                 for k, v in rec.items():
                     if isinstance(v, str):
                         rec[k] = v.strip()
-                    if k == "AttachmentName" and isinstance(v, str):
-                        rec["news_id"] = v.replace(".pdf", "")
-                    if k == "Tradedate" and isinstance(v, str):
-                        try:
-                            rec[k] = datetime.strptime(
-                                v, "%d/%m/%Y %H:%M:%S"
-                            ).strftime("%Y-%m-%d %H:%M:%S")
-                        except Exception:
-                            self.logger.info(
-                                f"news_id skip — invalid Tradedate for {rec.get('news_id', 'unknown')}"
-                            )
-                            raise ValueError("Invalid Tradedate")
+
+                try:
+                    rec["Tradedate"] = datetime.strptime(
+                        rec["Tradedate"], "%d/%m/%Y %H:%M:%S"
+                    ).strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    continue
 
                 desc = rec.get("Descriptor", "").strip()
                 head = rec.get("HeadLine", "").lower()
                 body = rec.get("NewsBody", "").lower()
 
-                matched = False
                 if desc in self.category_map:
-                    rec["Category"] = desc
-                    matched = True
+                    rec["category"] = desc
                 else:
-                    for cat, rule in self.category_map.items():
-                        if (rule["HeadLine"] and re.search(rule["HeadLine"], head, re.I)) or (
-                            rule["NewsBody"] and re.search(rule["NewsBody"], body, re.I)
-                        ):
-                            rec["Category"] = cat
-                            matched = True
-                            break
-
-                if not matched:
-                    rec["Category"] = "General"
+                    rec["category"] = next(
+                        (
+                            cat
+                            for cat, rule in self.category_map.items()
+                            if (rule["HeadLine"] and re.search(rule["HeadLine"], head, re.I))
+                            or (rule["NewsBody"] and re.search(rule["NewsBody"], body, re.I))
+                        ),
+                        "General",
+                    )
 
                 filtered.append(rec)
 
             except Exception as e:
-                self.logger.error(f"news_id skip — cleaning or categorization error: {e}")
+                self.logger.error(f"⚠️ skip {rec.get('news_id', '?')}: {e}")
 
         return filtered
+
 
     # =========================================================
     # ---------------- PANDAS HELPER --------------------------
     # =========================================================
-    def helper_pandas(self, docs):
+    async def helper_pandas(self, docs, existing_news_ids=[]):
         df = pd.DataFrame(docs)
         df["SCRIP_CD"] = df["SCRIP_CD"].astype(str).str.strip()
         df = df[df["SCRIP_CD"].isin(self.company_dict.keys())].copy()
-        df["symbolmap"] = df["SCRIP_CD"].map(self.company_dict)
         df["AttachmentName"] = df["AttachmentName"].astype(str).str.strip()
         df["news_id"] = df["AttachmentName"].str.replace(".pdf", "", regex=False)
+
+        if existing_news_ids:
+            df = df[~df["news_id"].isin(existing_news_ids)].copy()
+            if df.empty:
+                return []
+
+        df = df.reset_index(drop=True)
+
+        df[["company", "symbolmap"]] = df["SCRIP_CD"].astype(str).apply(
+            lambda x: pd.Series(self.company_dict.get(x, {})).reindex(["company", "symbolmap"])
+        )
+
         df["HeadLine"] = df["HeadLine"].astype(str).str.strip().str.lower()
         df["NewsBody"] = df["NewsBody"].fillna("").astype(str).str.strip().str.lower()
         df["Tradedate"] = (
@@ -91,31 +112,29 @@ class FilterCategorize(Base):
             .dt.strftime("%Y-%m-%d %H:%M:%S")
         )
 
-        df.loc[df["Descriptor"].isin(self.category_map.keys()), "Category"] = df["Descriptor"]
+        df.loc[df["Descriptor"].isin(self.category_map.keys()), "category"] = df["Descriptor"]
 
         for cat, rule in self.category_map.items():
-            mask = df["Category"].isna() & df["HeadLine"].str.contains(
-                rule["HeadLine"], case=False, na=False
-            )
+            mask = df["category"].isna() & df["HeadLine"].str.contains(rule["HeadLine"], case=False, na=False)
             if rule["NewsBody"]:
-                mask |= df["Category"].isna() & df["NewsBody"].str.contains(
-                    rule["NewsBody"], case=False, na=False
-                )
-            df.loc[mask, "Category"] = cat
+                mask |= df["category"].isna() & df["NewsBody"].str.contains(rule["NewsBody"], case=False, na=False)
+            df.loc[mask, "category"] = cat
 
-        df["Category"] = df["Category"].fillna("General")
+        df["category"] = df["category"].fillna("General")
 
         return df.to_dict("records")
+
 
     # =========================================================
     # ---------------- MASTER SWITCH --------------------------
     # =========================================================
-    def run_formator(self, docs):
+    async def run_formator(self, docs):
         n = len(docs)
+        existing_news_ids = await self.fetch_existing_news_ids()
         if n < self.min_len_doc_for_df:
             self.logger.info(f"🌀 Processing {n} records using FOR-LOOP helper")
-            all_docs = self.helper_forloop(docs)
+            all_docs = await self.helper_forloop(docs, existing_news_ids)
         else:
             self.logger.info(f"🚀 Processing {n} records using PANDAS helper")
-            all_docs = self.helper_pandas(docs)
+            all_docs = await self.helper_pandas(docs, existing_news_ids)
         return all_docs

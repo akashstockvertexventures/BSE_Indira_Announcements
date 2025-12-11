@@ -1,11 +1,13 @@
 from datetime import datetime
+from pathlib import Path
 
-BSE_INDIRA_HIST_MIN_DATE = datetime(2023, 11, 1)   # 1st Nov 2023
-BSE_INDIRA_HIST_MAX_DATE = datetime(2025, 10, 31)  # 31st Oct 2025
+
+BSE_INDIRA_HIST_MIN_DATE = datetime(2023, 11, 1)  
+BSE_INDIRA_HIST_MAX_DATE = datetime(2025, 10, 31) 
 BSE_INDIRA_TIMEOUT_SEC = 50
 BSE_INDIRA_RETRY_DELAY_SEC = 2
 BSE_INDIRA_CONCURRENCY_LIMIT = 20
-BSE_INDIRA_RETRY_FETCH = 3
+BSE_INDIRA_RETRY_COUNT = 3
 BSE_INDIRA_LIVE_DATA_DAYS = 5
 
 COMPANY_SYMBOL_MAP_QUERY = {
@@ -16,9 +18,33 @@ COMPANY_SYMBOL_MAP_QUERY = {
         }
 
 CATEGORY_MAP = {
-            "Investor Presentation": {"HeadLine": r"presentation", "NewsBody": None},
-            "Annual Report": {"HeadLine": r"annual report", "NewsBody": None},
-            "Credit Rating": {"HeadLine": r"credit rating", "NewsBody": None},
-            "Earnings Call Transcript": {"HeadLine": r"earnings call|conference call|transcript","NewsBody": r"concall"}
-            }
+    "Investor Presentation": {
+        "short_name": "IP",
+        "HeadLine": r"presentation",
+        "NewsBody": None
+    },
+    "Annual Report": {
+        "short_name": "AR",
+        "HeadLine": r"annual report",
+        "NewsBody": None
+    },
+    "Credit Rating": {
+        "short_name": "CR",
+        "HeadLine": r"credit rating",
+        "NewsBody": None
+    },
+    "Earnings Call Transcript": {
+        "short_name": "ECT",
+        "HeadLine": r"earnings call|conference call|transcript",
+        "NewsBody": None
+    }
+}
+
+
+
 LEN_PANDAS_MIN_DOCS = 10
+BASE_DIR = Path(__file__).resolve().parent.parent
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+LOG_LEVEL = "INFO"
+LOG_RETENTION_DAYS = 7

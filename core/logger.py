@@ -1,9 +1,9 @@
 import logging
 from concurrent_log_handler import ConcurrentTimedRotatingFileHandler
-from config.settings import LOG_DIR
+from config.constants import LOG_DIR, LOG_RETENTION_DAYS
 
 
-def get_logger(name: str = "news_pipeline", save_time_logs: bool = True) -> logging.Logger:
+def get_logger(name: str = "bse_indira_pipeline", save_time_logs: bool = True) -> logging.Logger:
     """
     Create a logger. If save_time_logs=True -> rotate daily.
     If False -> single static log file with no rotation need """
@@ -24,7 +24,7 @@ def get_logger(name: str = "news_pipeline", save_time_logs: bool = True) -> logg
             filename=str(log_path),
             when="midnight",
             interval=1,
-            backupCount=30,
+            backupCount=LOG_RETENTION_DAYS,
             encoding="utf-8",
         )
     else:
