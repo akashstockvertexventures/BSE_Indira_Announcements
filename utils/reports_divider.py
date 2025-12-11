@@ -1,12 +1,45 @@
 from datetime import datetime
 from core.base import Base
 import pandas as pd
-from config.constants import CATEGORY_MAP, LEN_PANDAS_MIN_DOCS
+import asyncio
+from config.constants import CATEGORY_MAP
 
 class ReportsDivider(Base):
     def __init__(self):
         super().__init__(name="bse_reports_divider", save_time_logs=True)
         self.logger.info("✅ Initialized ReportsDivider")
+        self.mongodb_insert_batch = 1000
+
+    async def insert_in_batches(self, collection, docs, category=None):
+        if not docs:
+            self.logger.info(f"⚠️ No docs to insert for {category or collection.name}")
+            return
+        
+        batch_size = self.mongodb_insert_batch
+        total = len(docs)
+        if total <= batch_size:
+            try:
+                res = await collection.insert_many(docs)
+                self.logger.info(f"✅ {len(res.inserted_ids)} docs → {category or collection.name}")
+            except Exception as e:
+                self.logger.error(f"❌ Insert fail → {category or collection.name}: {e}")
+            return
+        
+        total_batches = (total + batch_size - 1) // batch_size
+        inserted = 0
+        for i in range(0, total, batch_size):
+            chunk = docs[i:i + batch_size]
+            try:
+                res = await collection.insert_many(chunk)
+                count = len(res.inserted_ids)
+                inserted += count
+                self.logger.info(f"✅ Batch {i//batch_size + 1}/{total_batches} → {count} docs → {category or collection.name}")
+            except Exception as e:
+                self.logger.error(f"❌ Batch {i//batch_size + 1}/{total_batches} → {category or collection.name}: {e}")
+            await asyncio.sleep(2)
+        self.logger.info(f"📦 Done → {inserted}/{total} docs → {category or collection.name}")
+
+
 
     async def structure_report_doc(self, doc: dict):
         try:
@@ -136,9 +169,8 @@ class ReportsDivider(Base):
                 all_category_is_general = True
             
             annoucement_docs = df.to_dict(orient="records")
-            res_all = await self.collection_all_ann.insert_many(annoucement_docs)
-            self.logger.info(f"📦 Inserted {len(res_all.inserted_ids)} docs → AllAnnouncements")
-
+            await self.insert_in_batches(collection=self.collection_all_ann, docs=annoucement_docs)
+            
             if not all_category_is_general:
                 for category, cat_info in CATEGORY_MAP.items():
                     df_filtered = df[df["category"] == category]
@@ -149,8 +181,7 @@ class ReportsDivider(Base):
                     short_cat = cat_info.get("short_name", category[:2].upper())
                     structured_docs = await self.format_category_docs(df_filtered, category, short_cat, existing_report_id_mapping)
                     if structured_docs:
-                        await self.collection_all_reports.insert_many(structured_docs)
-                        self.logger.info(f"✅ Inserted {len(structured_docs)} structured docs for {category}")
+                        await self.insert_in_batches(collection=self.collection_all_reports, docs=structured_docs, category=category)
                         
         except Exception as e:
             self.logger.error(f"❌ process_and_distribute_reports_df failed: {e}")

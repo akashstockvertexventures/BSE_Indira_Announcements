@@ -6,6 +6,7 @@ from processes.bse_corp_ann_api import BSECorpAnnouncementClient
 from utils.categorize_with_filter import FilterCategorize
 from utils.reports_divider import ReportsDivider
 import aiohttp
+import aiofiles, os, json
 
 class BSEAnnouncementPipeline:
     def __init__(self):
@@ -13,6 +14,53 @@ class BSEAnnouncementPipeline:
         self.bse_client = BSECorpAnnouncementClient()
         self.categorizer = FilterCategorize()
         self.divider = ReportsDivider()
+        self.maintain_json = True
+
+ 
+    async def maintain_json_file(self, new_data, data_type="normal", fetch_type="live"):
+        mapping = {
+            ("filter", "live"): "categorized_announcements_live.jsonl",
+            ("filter", "hist"): "categorized_announcements_hist.jsonl",
+            ("normal", "live"): "live_announcements.jsonl",
+            ("normal", "hist"): "hist_announcements.jsonl",
+        }
+        filename = mapping.get((data_type, fetch_type), "unknown_data.jsonl")
+
+        base_dir = "files"
+        filepath = os.path.join(base_dir, filename)
+        index_path = filepath + ".index"
+        os.makedirs(base_dir, exist_ok=True)
+
+        try:
+            existing_ids = set()
+            if os.path.exists(index_path):
+                async with aiofiles.open(index_path, "r", encoding="utf-8") as idx_file:
+                    content = await idx_file.read()
+                    if content.strip():
+                        existing_ids = set(content.splitlines())
+
+            new_unique = [
+                d for d in new_data
+                if isinstance(d, dict)
+                and (news_id := d.get("news_id"))
+                and news_id not in existing_ids
+            ]
+
+            if not new_unique:
+                return
+
+            lines = [json.dumps(doc, ensure_ascii=False) + "\n" for doc in new_unique]
+            async with aiofiles.open(filepath, "a", encoding="utf-8") as f:
+                await f.writelines(lines)
+
+            async with aiofiles.open(index_path, "a", encoding="utf-8") as idx:
+                await idx.writelines(f"{doc['news_id']}\n" for doc in new_unique if "news_id" in doc)
+
+            self.logger.info(f"✅ Appended {len(new_unique)} new records → {filename}")
+
+        except Exception as e:
+            self.logger.error(f"⚠️ Failed to maintain {filename}: {e}")
+
 
     async def fetch_and_process(self, fetch_type="live", from_date=None, to_date=None, lastnews_dt_tm=None):
         try:
@@ -26,6 +74,9 @@ class BSEAnnouncementPipeline:
             if not announcements:
                 self.logger.warning("⚠️ No announcements fetched.")
                 return
+            
+            if self.maintain_json:
+                await self.maintain_json_file(announcements, data_type="normal", fetch_type=fetch_type)
 
             self.logger.info(f"✅ Fetched {len(announcements)} announcements")
             self.logger.info("📊 Step 2: Categorizing announcements...")
@@ -34,6 +85,9 @@ class BSEAnnouncementPipeline:
             if not categorized_docs:
                 self.logger.info("⚠️ No docs after filter using company master and assign category")
                 return
+            
+            if self.maintain_json:
+                await self.maintain_json_file(categorized_docs, data_type="filter", fetch_type=fetch_type)
 
             self.logger.info(f"✅ Categorized {len(categorized_docs)} announcements")
             self.logger.info("📍 Step 3: Dividing by category and inserting to collections...")
@@ -42,9 +96,11 @@ class BSEAnnouncementPipeline:
         except Exception as e:
             self.logger.error(f"❌ Pipeline failed during processing: {e}", exc_info=False)
 
-    async def run_pipeline(self):
-        # await self.is_internet()
-        # await self.fetch_and_process(fetch_type="hist", from_date=datetime(2023, 11, 1), to_date=datetime(2025, 10, 31))
+    async def run_pipeline(self, hist=False):
+        if hist:
+            await self.is_internet()
+            await self.fetch_and_process(fetch_type="hist", from_date=datetime(2023, 11, 1), to_date=datetime(2025, 10, 31))
+
         interval_minutes = RUN_INTERVAL_TIME_MIN or 1
         self.logger.info(f"🚀 Starting BSE Live Announcements Pipeline | Interval: {interval_minutes} min")
         lastnews_dt_tm = None
@@ -94,7 +150,7 @@ class BSEAnnouncementPipeline:
 if __name__ == "__main__":
     pipeline = BSEAnnouncementPipeline()
     try:
-        asyncio.run(pipeline.run_pipeline())
+        asyncio.run(pipeline.run_pipeline(hist=False))
     except KeyboardInterrupt:
         pipeline.logger.info("✋ Pipeline stopped by user (KeyboardInterrupt)")
     except Exception as e:

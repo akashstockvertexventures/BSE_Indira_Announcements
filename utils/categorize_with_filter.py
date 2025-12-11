@@ -88,27 +88,43 @@ class FilterCategorize(Base):
     # ---------------- PANDAS HELPER --------------------------
     # =========================================================
     async def helper_pandas(self, docs, existing_news_ids=[]):
+
         df = pd.DataFrame(docs)
+
+        # ✅ Precache set for ultra-fast filtering
+        valid_scrips = set(self.company_dict.keys())
+
         df["SCRIP_CD"] = df["SCRIP_CD"].astype(str).str.strip()
-        df = df[df["SCRIP_CD"].isin(self.company_dict.keys())].copy()
+        df = df[df["SCRIP_CD"].isin(valid_scrips)].copy()
+        if df.empty:
+            return []
+
         df["AttachmentName"] = df["AttachmentName"].astype(str).str.strip()
         df["news_id"] = df["AttachmentName"].str.replace(".pdf", "", regex=False)
 
+        # ✅ Fast filtering using set membership
         if existing_news_ids:
-            df = df[~df["news_id"].isin(existing_news_ids)].copy()
+            existing_ids = set(existing_news_ids)
+            df = df[~df["news_id"].isin(existing_ids)].copy()
             if df.empty:
                 return []
 
-        df = df.reset_index(drop=True)
+        df.reset_index(drop=True, inplace=True)
 
-        df[["company", "symbolmap"]] = df["SCRIP_CD"].astype(str).apply(
-            lambda x: pd.Series(self.company_dict.get(x, {})).reindex(["company", "symbolmap"])
+        # ✅ Fastest company/symbolmap merge (vectorized)
+        company_df = (
+            pd.DataFrame.from_dict(self.company_dict, orient="index")
+            .reindex(columns=["company", "symbolmap"])
+            .rename_axis("SCRIP_CD")
+            .reset_index()
         )
+        df = df.merge(company_df, on="SCRIP_CD", how="left")
 
         df["HeadLine"] = df["HeadLine"].astype(str).str.strip().str.lower()
         df["NewsBody"] = df["NewsBody"].fillna("").astype(str).str.strip().str.lower()
+
         df["Tradedate"] = (
-            pd.to_datetime(df["Tradedate"], errors="coerce", format="%d/%m/%Y %H:%M:%S")
+            pd.to_datetime(df["Tradedate"], errors="coerce", dayfirst=True)
             .dt.strftime("%Y-%m-%d %H:%M:%S")
         )
 
@@ -123,6 +139,7 @@ class FilterCategorize(Base):
         df["category"] = df["category"].fillna("General")
 
         return df.to_dict("records")
+
 
 
     # =========================================================
