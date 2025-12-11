@@ -7,6 +7,7 @@ from utils.categorize_with_filter import FilterCategorize
 from utils.reports_divider import ReportsDivider
 import aiohttp
 import aiofiles, os, json
+from tqdm.asyncio import tqdm_asyncio
 
 class BSEAnnouncementPipeline:
     def __init__(self):
@@ -14,9 +15,8 @@ class BSEAnnouncementPipeline:
         self.bse_client = BSECorpAnnouncementClient()
         self.categorizer = FilterCategorize()
         self.divider = ReportsDivider()
-        self.maintain_json = True
+        self.maintain_json = False
 
- 
     async def maintain_json_file(self, new_data, data_type="normal", fetch_type="live"):
         mapping = {
             ("filter", "live"): "categorized_announcements_live.jsonl",
@@ -25,39 +25,34 @@ class BSEAnnouncementPipeline:
             ("normal", "hist"): "hist_announcements.jsonl",
         }
         filename = mapping.get((data_type, fetch_type), "unknown_data.jsonl")
-
         base_dir = "files"
-        filepath = os.path.join(base_dir, filename)
-        index_path = filepath + ".index"
+        filepath, index_path = os.path.join(base_dir, filename), os.path.join(base_dir, filename + ".index")
         os.makedirs(base_dir, exist_ok=True)
-
         try:
             existing_ids = set()
             if os.path.exists(index_path):
-                async with aiofiles.open(index_path, "r", encoding="utf-8") as idx_file:
-                    content = await idx_file.read()
+                async with aiofiles.open(index_path, "r", encoding="utf-8") as idx:
+                    content = await idx.read()
                     if content.strip():
                         existing_ids = set(content.splitlines())
 
-            new_unique = [
-                d for d in new_data
-                if isinstance(d, dict)
-                and (news_id := d.get("news_id"))
-                and news_id not in existing_ids
-            ]
-
+            new_unique = [d for d in new_data if isinstance(d, dict) and (nid := d.get("news_id")) and nid not in existing_ids]
             if not new_unique:
                 return
 
-            lines = [json.dumps(doc, ensure_ascii=False) + "\n" for doc in new_unique]
+            if len(new_unique) >= 1000:
+                async def _to_json_line(doc): return json.dumps(doc, ensure_ascii=False) + "\n"
+                tasks = [_to_json_line(doc) for doc in new_unique]
+                lines = [await t for t in tqdm_asyncio.as_completed(tasks, total=len(tasks), desc=f"Writing {filename}", unit="doc")]
+            else:
+                lines = [json.dumps(doc, ensure_ascii=False) + "\n" for doc in new_unique]
+
             async with aiofiles.open(filepath, "a", encoding="utf-8") as f:
                 await f.writelines(lines)
-
             async with aiofiles.open(index_path, "a", encoding="utf-8") as idx:
                 await idx.writelines(f"{doc['news_id']}\n" for doc in new_unique if "news_id" in doc)
 
             self.logger.info(f"✅ Appended {len(new_unique)} new records → {filename}")
-
         except Exception as e:
             self.logger.error(f"⚠️ Failed to maintain {filename}: {e}")
 
