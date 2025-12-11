@@ -1,6 +1,6 @@
 import asyncio
 from datetime import datetime
-from config.constants import RUN_INTERVAL_TIME_MIN
+from config.constants import RUN_INTERVAL_TIME_MIN, BSE_INDIRA_HIST_MIN_DATE, BSE_INDIRA_HIST_MAX_DATE
 from core.logger import get_logger
 from processes.bse_corp_ann_api import BSECorpAnnouncementClient
 from utils.categorize_with_filter import FilterCategorize
@@ -94,7 +94,7 @@ class BSEAnnouncementPipeline:
     async def run_pipeline(self, hist=False):
         if hist:
             await self.is_internet()
-            await self.fetch_and_process(fetch_type="hist", from_date=datetime(2023, 11, 1), to_date=datetime(2025, 10, 31))
+            await self.fetch_and_process(fetch_type="hist", from_date=BSE_INDIRA_HIST_MIN_DATE, to_date=BSE_INDIRA_HIST_MAX_DATE)
 
         interval_minutes = RUN_INTERVAL_TIME_MIN or 1
         self.logger.info(f"🚀 Starting BSE Live Announcements Pipeline | Interval: {interval_minutes} min")
