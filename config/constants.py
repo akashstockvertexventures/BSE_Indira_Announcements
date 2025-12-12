@@ -18,24 +18,22 @@ COMPANY_SYMBOL_MAP_QUERY = {
             "companyname": {"$not": {"$regex": "(?i)partly\\s?paid"}},
         }
 
+ALLREPORTS_CATEGORY_MAP = {"Investor Presentation":"IP","Annual Report":"AR","Credit Rating":"CR", "Earnings Call Transcript":"ECT"}
+
 CATEGORY_MAP = {
     "Investor Presentation": {
-        "short_name": "IP",
         "HeadLine": r"presentation",
         "NewsBody": None
     },
     "Annual Report": {
-        "short_name": "AR",
         "HeadLine": r"annual report",
         "NewsBody": None
     },
     "Credit Rating": {
-        "short_name": "CR",
         "HeadLine": r"credit rating",
         "NewsBody": None
     },
     "Earnings Call Transcript": {
-        "short_name": "ECT",
         "HeadLine": r"earnings call|conference call|transcript",
         "NewsBody": None
     }

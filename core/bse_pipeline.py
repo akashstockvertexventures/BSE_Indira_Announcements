@@ -6,7 +6,7 @@ from tqdm.asyncio import tqdm_asyncio
 from config.constants import (
     BSE_INDIRA_HIST_MIN_DATE,
     BSE_INDIRA_LIVE_DATA_DAYS,
-    CATEGORY_MAP
+    ALLREPORTS_CATEGORY_MAP
 )
 from core.logger import get_logger
 from processes.bse_corp_ann_api import BSECorpAnnouncementClient
@@ -21,7 +21,7 @@ class BSEAnnouncementPipeline:
         self.categorizer = FilterCategorize()
         self.divider = ReportsDivider()
         self.maintain_json = False
-        self.reports_cat = CATEGORY_MAP.keys()
+        self.reports_cat = ALLREPORTS_CATEGORY_MAP.keys()
 
     # ------------------------ JSON Maintenance ------------------------
     async def maintain_json_file(self, new_data, data_type="normal", fetch_type="live"):

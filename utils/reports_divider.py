@@ -3,7 +3,7 @@ from core.base import Base
 import pandas as pd
 import asyncio
 from pymongo.errors import BulkWriteError
-from config.constants import CATEGORY_MAP
+from config.constants import ALLREPORTS_CATEGORY_MAP
 
 class ReportsDivider(Base):
     def __init__(self):
@@ -35,63 +35,6 @@ class ReportsDivider(Base):
             self.logger.info(f"✅ Batch {i//batch_size + 1}/{total_batches} → Inserted {inserted}/{total} (Skipped {duplicates} dups) → {category or collection.name}")
             await asyncio.sleep(0.5)
         self.logger.info(f"📦 Done → Inserted {inserted}/{total} (Skipped {duplicates} duplicates) → {category or collection.name}")
-
-    async def structure_report_doc(self, doc: dict):
-        try:
-            category = doc.get("category")
-            cat_info = CATEGORY_MAP.get(category, {})
-            if not cat_info:
-                return
-            
-            short_cat = cat_info.get("short_name", category[:2].upper())
-            tradedate = doc.get("Tradedate")
-            company = doc.get("company")
-            news_id = doc.get("news_id")
-            symbolmap = doc.get("symbolmap", {})
-            attachment_url = doc.get("ATTACHMENTURL")
-            newsbody = doc.get("NewsBody", "")
-            dt_obj = datetime.strptime(tradedate, "%Y-%m-%d %H:%M:%S")
-            datecode = dt_obj.strftime("%Y%m%d")
-            month = dt_obj.month
-            year = dt_obj.year           
-
-            if 1 <= month <= 3:
-                qtr = "Q3"
-                fin_year = year - 1
-            elif 4 <= month <= 6:
-                qtr = "Q4"
-                fin_year = year - 1
-            elif 7 <= month <= 9:
-                qtr = "Q1"
-                fin_year = year
-            else:
-                qtr = "Q2"
-                fin_year = year
-
-            existing_report_ids = self.collection_all_reports.distinct('report_id', {"company":company, "Year": fin_year, "Qtr": qtr })
-            company_short_cat_year_qtr_count = len(existing_report_ids) + 1
-
-            report_id = f"{company}_{short_cat}_FY{year}{qtr}_{company_short_cat_year_qtr_count}"
-            new_doc = {
-                "company": company,
-                "symbolmap": symbolmap,
-                "news_id": news_id,
-                "datecode": datecode,
-                "Year": fin_year,
-                "Qtr": qtr,
-                "dt_tm": tradedate,
-                "url": attachment_url,
-                "report_id": report_id,
-                "report_type": category,
-                "report_line": newsbody,
-                "count": company_short_cat_year_qtr_count,
-                "document_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-            return new_doc
-
-        except Exception as e:
-            self.logger.error(f"structure_report_doc error: {e}")
-            return None
         
     def build_existing_counts_map(self, category_existing_report_ids: list) -> dict:
         counts_map = {}
@@ -167,30 +110,26 @@ class ReportsDivider(Base):
             }
         return list(ids)
 
-    async def all_reports_runner(self, docs, tradedate, all_category_is_general=False):
+    async def all_reports_runner(self, docs, tradedate):
         if not docs:
             return
-        if not all_category_is_general:
-            df = pd.DataFrame(docs)
-            for category, cat_info in CATEGORY_MAP.items():
-                category_existing_report_ids = await self.get_category_existing_report_ids(category, tradedate)
-                df_filtered = df[
-                    (df["category"] == category)
-                    & (~df["news_id"].isin(category_existing_report_ids))
-                ]
-                if df_filtered.empty:
-                    continue
-                existing_report_id_mapping = self.build_existing_counts_map(category_existing_report_ids)
-                short_cat = cat_info.get("short_name", category[:2].upper())
-                structured_docs = await self.format_category_docs(
-                    df_filtered, category, short_cat, existing_report_id_mapping
+        df = pd.DataFrame(docs)
+        for category, short_cat in ALLREPORTS_CATEGORY_MAP.items():
+            category_existing_report_ids = await self.get_category_existing_report_ids(category, tradedate)
+            df_filtered = df[
+                (df["category"] == category)
+                & (~df["news_id"].isin(category_existing_report_ids))
+            ]
+            if df_filtered.empty:
+                continue
+            existing_report_id_mapping = self.build_existing_counts_map(category_existing_report_ids)
+            structured_docs = await self.format_category_docs(df_filtered, category, short_cat, existing_report_id_mapping)
+            if structured_docs:
+                await self.insert_in_batches(
+                    collection=self.collection_all_reports,
+                    docs=structured_docs,
+                    category=category,
                 )
-                if structured_docs:
-                    await self.insert_in_batches(
-                        collection=self.collection_all_reports,
-                        docs=structured_docs,
-                        category=category,
-                    )
 
     async def divide_and_insert_docs(self, docs, tradedate):
         try:
@@ -206,7 +145,8 @@ class ReportsDivider(Base):
             
             annoucement_docs = df.to_dict(orient="records")
             await self.insert_in_batches(collection=self.collection_all_ann, docs=annoucement_docs)
-            await self.all_reports_runner(docs=annoucement_docs, tradedate=tradedate, all_category_is_general=all_category_is_general)
+            if not all_category_is_general:
+                await self.all_reports_runner(docs=annoucement_docs, tradedate=tradedate)
 
         except Exception as e:
             self.logger.error(f"❌ process_and_distribute_reports_df failed: {e}")
