@@ -61,12 +61,11 @@ async def run_pipeline_loop(pipeline: BSEAnnouncementPipeline, hist=False):
         start_time = datetime.now()
         run_start_time = start_time.replace(second=0, microsecond=0)
 
-        await pipeline.fetch_and_process(lastnews_dt_tm=lastnews_dt_tm)
+        is_fetch = await pipeline.fetch_and_process(lastnews_dt_tm=lastnews_dt_tm)
         duration = (datetime.now() - start_time).seconds
         logger.info(f"🕒 Cycle completed in {duration} seconds")
-
-        lastnews_dt_tm = run_start_time
-        logger.info(f"✅ Next fetch will use: {lastnews_dt_tm.strftime('%d/%m/%Y %H:%M:00')}")
+        if is_fetch:
+            lastnews_dt_tm = run_start_time
         logger.info(f"💤 Sleeping for {interval_minutes} minutes...\n")
         await asyncio.sleep(interval_minutes * 60)
 

@@ -109,7 +109,7 @@ class BSEAnnouncementPipeline:
             
             if not announcements:
                 self.logger.warning("⚠️ No announcements fetched.")
-                return
+                return False
 
             if self.maintain_json:
                 await self.maintain_json_file(announcements, data_type="normal", fetch_type=fetch_type)
@@ -120,7 +120,7 @@ class BSEAnnouncementPipeline:
 
             if not categorized_docs:
                 self.logger.info("⚠️ No docs after filtering or categorization")
-                return
+                return True
 
             if self.maintain_json:
                 await self.maintain_json_file(categorized_docs, data_type="filter", fetch_type=fetch_type)
