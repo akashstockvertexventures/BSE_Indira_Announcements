@@ -12,22 +12,39 @@ class FilterCategorize(Base):
         self.company_dict = self.fetch_load_symbolmap()
         if not self.company_dict:
             self.logger.error("❌ Company symbol map not loaded.")
-
         self.category_map = CATEGORY_MAP
+        self.compile_category_rules()
         self.min_len_doc_for_df = LEN_PANDAS_MIN_DOCS
         self.logger.info(
             f"✅ Initialized Formator | symbolmap: {len(self.company_dict) if self.company_dict else 0}"
         )
 
-    async def fetch_existing_news_ids(self):
-        existing_news_ids = await self.collection_all_ann.distinct("news_id")
-        return existing_news_ids
+    async def fetch_existing_news_ids(self, trade_date: str) -> list:
+        cursor = self.collection_all_ann.find(
+            {"Tradedate": {"$gte": trade_date}},
+            {"_id": 0, "news_id": 1}
+        ).sort("Tradedate", -1)
+        news_ids = {doc["news_id"] async for doc in cursor if doc.get("news_id")}
+        return list(news_ids)
 
-    # =========================================================
+    # ---------------- REGEX PRECOMPILATION -------------------
+    def compile_category_rules(self):
+        """Precompile regex patterns once for speed."""
+        self.compiled_rules = {}
+        for cat, rule in self.category_map.items():
+            self.compiled_rules[cat] = {
+                "HeadLine": re.compile(rule["HeadLine"], re.I) if rule.get("HeadLine") else None,
+                "NewsBody": re.compile(rule["NewsBody"], re.I) if rule.get("NewsBody") else None,
+            }
+        self.logger.info(f"🧠 Precompiled {len(self.compiled_rules)} category regex rules.")
+
     # ---------------- FOR LOOP HELPER ------------------------
-    # =========================================================
-    async def helper_forloop(self, docs, existing_news_ids=[]):
-        filtered, existing_ids = [], set(existing_news_ids)
+    async def helper_forloop(self, docs, existing_news_ids=None):
+        if existing_news_ids is None:
+            existing_news_ids = []
+
+        filtered = []
+        existing_ids = set(existing_news_ids)
 
         for rec in docs:
             try:
@@ -35,18 +52,18 @@ class FilterCategorize(Base):
                 if not attach.endswith(".pdf"):
                     continue
 
-                news_id = attach.replace(".pdf", "")
+                news_id = attach[:-4]
                 if news_id in existing_ids:
                     continue
 
                 bse_cd = str(rec.get("SCRIP_CD", "")).strip()
-                if bse_cd not in self.company_dict:
+                info = self.company_dict.get(bse_cd)
+                if not info:
                     continue
 
-                info = self.company_dict[bse_cd]
+                rec["news_id"] = news_id
                 rec["symbolmap"] = info.get("symbolmap")
                 rec["company"] = info.get("company")
-                rec["news_id"] = news_id
 
                 for k, v in rec.items():
                     if isinstance(v, str):
@@ -59,9 +76,9 @@ class FilterCategorize(Base):
                 except Exception:
                     continue
 
-                desc = rec.get("Descriptor", "").strip()
-                head = rec.get("HeadLine", "").lower()
-                body = rec.get("NewsBody", "").lower()
+                desc = str(rec.get("Descriptor", "")).strip()
+                head = str(rec.get("HeadLine", "")).lower()
+                body = str(rec.get("NewsBody", "")).lower()
 
                 if desc in self.category_map:
                     rec["category"] = desc
@@ -69,49 +86,48 @@ class FilterCategorize(Base):
                     rec["category"] = next(
                         (
                             cat
-                            for cat, rule in self.category_map.items()
-                            if (rule["HeadLine"] and re.search(rule["HeadLine"], head, re.I))
-                            or (rule["NewsBody"] and re.search(rule["NewsBody"], body, re.I))
+                            for cat, rule in self.compiled_rules.items()
+                            if (rule["HeadLine"] and rule["HeadLine"].search(head))
+                            or (rule["NewsBody"] and rule["NewsBody"].search(body))
                         ),
                         "General",
                     )
 
                 filtered.append(rec)
+                existing_ids.add(news_id)
 
             except Exception as e:
-                self.logger.error(f"⚠️ skip {rec.get('news_id', '?')}: {e}")
+                self.logger.error(f"⚠️ Error processing record {rec.get('news_id', '?')}: {e}")
 
-        return filtered
+        self.logger.info(f"✅ Processed {len(filtered)} new records (FOR-LOOP)")
+        return filtered, list(existing_ids)
 
-
-    # =========================================================
     # ---------------- PANDAS HELPER --------------------------
-    # =========================================================
-    async def helper_pandas(self, docs, existing_news_ids=[]):
+    async def helper_pandas(self, docs, existing_news_ids=None):
+        if existing_news_ids is None:
+            existing_news_ids = []
+        if not docs:
+            return []
 
-        df = pd.DataFrame(docs)
-
-        # ✅ Precache set for ultra-fast filtering
-        valid_scrips = set(self.company_dict.keys())
-
-        df["SCRIP_CD"] = df["SCRIP_CD"].astype(str).str.strip()
-        df = df[df["SCRIP_CD"].isin(valid_scrips)].copy()
+        df = pd.json_normalize(docs)
         if df.empty:
             return []
 
+        valid_scrips = set(self.company_dict.keys())
         df["AttachmentName"] = df["AttachmentName"].astype(str).str.strip()
-        df["news_id"] = df["AttachmentName"].str.replace(".pdf", "", regex=False)
+        df.query('AttachmentName.str.endswith(".pdf")', inplace=True)
 
-        # ✅ Fast filtering using set membership
+        df["news_id"] = df["AttachmentName"].str[:-4]
+        df["SCRIP_CD"] = df["SCRIP_CD"].astype(str).str.strip()
+        df.query("SCRIP_CD in @valid_scrips", inplace=True)
+        df.drop_duplicates(subset="news_id", inplace=True)
+
         if existing_news_ids:
             existing_ids = set(existing_news_ids)
-            df = df[~df["news_id"].isin(existing_ids)].copy()
-            if df.empty:
-                return []
+            df = df[~df["news_id"].isin(existing_ids)]
+        if df.empty:
+            return []
 
-        df.reset_index(drop=True, inplace=True)
-
-        # ✅ Fastest company/symbolmap merge (vectorized)
         company_df = (
             pd.DataFrame.from_dict(self.company_dict, orient="index")
             .reindex(columns=["company", "symbolmap"])
@@ -120,38 +136,52 @@ class FilterCategorize(Base):
         )
         df = df.merge(company_df, on="SCRIP_CD", how="left")
 
-        df["HeadLine"] = df["HeadLine"].astype(str).str.strip().str.lower()
-        df["NewsBody"] = df["NewsBody"].fillna("").astype(str).str.strip().str.lower()
+        df["HeadLine"] = df["HeadLine"].astype(str).str.lower().str.strip()
+        df["NewsBody"] = df["NewsBody"].fillna("").astype(str).str.lower().str.strip()
+        df["Descriptor"] = df["Descriptor"].astype(str).str.strip()
 
-        df["Tradedate"] = (
-            pd.to_datetime(df["Tradedate"], errors="coerce", dayfirst=True)
-            .dt.strftime("%Y-%m-%d %H:%M:%S")
-        )
+        df["Tradedate"] = pd.to_datetime(df["Tradedate"], errors="coerce", dayfirst=True)
+        df.dropna(subset=["Tradedate"], inplace=True)
+        df["Tradedate"] = df["Tradedate"].dt.strftime("%Y-%m-%d %H:%M:%S")
 
+        df["category"] = None
         df.loc[df["Descriptor"].isin(self.category_map.keys()), "category"] = df["Descriptor"]
 
-        for cat, rule in self.category_map.items():
-            mask = df["category"].isna() & df["HeadLine"].str.contains(rule["HeadLine"], case=False, na=False)
-            if rule["NewsBody"]:
-                mask |= df["category"].isna() & df["NewsBody"].str.contains(rule["NewsBody"], case=False, na=False)
-            df.loc[mask, "category"] = cat
+        # ✅ FIXED MASK LOGIC (no NoneType OR issue)
+        for cat, rule in self.compiled_rules.items():
+            mask = df["category"].isna()
+            conds = []
 
+            if rule["HeadLine"]:
+                conds.append(df["HeadLine"].str.contains(rule["HeadLine"].pattern, case=False, na=False))
+            if rule["NewsBody"]:
+                conds.append(df["NewsBody"].str.contains(rule["NewsBody"].pattern, case=False, na=False))
+
+            if not conds:
+                continue
+
+            combined_mask = conds[0]
+            for c in conds[1:]:
+                combined_mask |= c
+
+            df.loc[mask & combined_mask, "category"] = cat
+
+        # ✅ Future-proof: no inplace warning
         df["category"] = df["category"].fillna("General")
 
+        self.logger.info(f"✅ Processed {len(df)} new records (PANDAS)")
         return df.to_dict("records")
 
-
-
-    # =========================================================
     # ---------------- MASTER SWITCH --------------------------
-    # =========================================================
-    async def run_formator(self, docs):
+    async def run_formator(self, docs, tradedate):
         n = len(docs)
-        existing_news_ids = await self.fetch_existing_news_ids()
+        existing_news_ids = await self.fetch_existing_news_ids(tradedate)
+
         if n < self.min_len_doc_for_df:
             self.logger.info(f"🌀 Processing {n} records using FOR-LOOP helper")
-            all_docs = await self.helper_forloop(docs, existing_news_ids)
+            all_docs, _ = await self.helper_forloop(docs, existing_news_ids)
         else:
             self.logger.info(f"🚀 Processing {n} records using PANDAS helper")
             all_docs = await self.helper_pandas(docs, existing_news_ids)
+
         return all_docs

@@ -1,154 +1,90 @@
 import asyncio
-from datetime import datetime
-from config.constants import RUN_INTERVAL_TIME_MIN, BSE_INDIRA_HIST_MIN_DATE, BSE_INDIRA_HIST_MAX_DATE
-from core.logger import get_logger
-from processes.bse_corp_ann_api import BSECorpAnnouncementClient
-from utils.categorize_with_filter import FilterCategorize
-from utils.reports_divider import ReportsDivider
 import aiohttp
-import aiofiles, os, json
-from tqdm.asyncio import tqdm_asyncio
+import argparse
+from datetime import datetime
+from core.bse_pipeline import BSEAnnouncementPipeline
+from config.constants import (
+    RUN_INTERVAL_TIME_MIN,
+    BSE_INDIRA_HIST_MIN_DATE,
+    BSE_INDIRA_HIST_MAX_DATE
 
-class BSEAnnouncementPipeline:
-    def __init__(self):
-        self.logger = get_logger("bse_pipeline", save_time_logs=True)
-        self.bse_client = BSECorpAnnouncementClient()
-        self.categorizer = FilterCategorize()
-        self.divider = ReportsDivider()
-        self.maintain_json = False
+)
 
-    async def maintain_json_file(self, new_data, data_type="normal", fetch_type="live"):
-        mapping = {
-            ("filter", "live"): "categorized_announcements_live.jsonl",
-            ("filter", "hist"): "categorized_announcements_hist.jsonl",
-            ("normal", "live"): "live_announcements.jsonl",
-            ("normal", "hist"): "hist_announcements.jsonl",
-        }
-        filename = mapping.get((data_type, fetch_type), "unknown_data.jsonl")
-        base_dir = "files"
-        filepath, index_path = os.path.join(base_dir, filename), os.path.join(base_dir, filename + ".index")
-        os.makedirs(base_dir, exist_ok=True)
+# ------------------------ Internet Check ------------------------
+async def is_internet(logger) -> bool:
+    test_url = "https://www.google.com/generate_204"
+    while True:
         try:
-            existing_ids = set()
-            if os.path.exists(index_path):
-                async with aiofiles.open(index_path, "r", encoding="utf-8") as idx:
-                    content = await idx.read()
-                    if content.strip():
-                        existing_ids = set(content.splitlines())
-
-            new_unique = [d for d in new_data if isinstance(d, dict) and (nid := d.get("news_id")) and nid not in existing_ids]
-            if not new_unique:
-                return
-
-            if len(new_unique) >= 1000:
-                async def _to_json_line(doc): return json.dumps(doc, ensure_ascii=False) + "\n"
-                tasks = [_to_json_line(doc) for doc in new_unique]
-                lines = [await t for t in tqdm_asyncio.as_completed(tasks, total=len(tasks), desc=f"Writing {filename}", unit="doc")]
-            else:
-                lines = [json.dumps(doc, ensure_ascii=False) + "\n" for doc in new_unique]
-
-            async with aiofiles.open(filepath, "a", encoding="utf-8") as f:
-                await f.writelines(lines)
-            async with aiofiles.open(index_path, "a", encoding="utf-8") as idx:
-                await idx.writelines(f"{doc['news_id']}\n" for doc in new_unique if "news_id" in doc)
-
-            self.logger.info(f"✅ Appended {len(new_unique)} new records → {filename}")
-        except Exception as e:
-            self.logger.error(f"⚠️ Failed to maintain {filename}: {e}")
+            async with aiohttp.ClientSession() as session:
+                async with session.get(test_url, timeout=5) as resp:
+                    if resp.status == 204:
+                        return True
+                    else:
+                        logger.warning("⚠ Captive portal detected or unexpected response.")
+        except Exception:
+            logger.warning("❌ No internet connection detected.")
+        logger.info("💤 Retrying internet check in 15 min...\n")
+        await asyncio.sleep(15 * 60)
 
 
-    async def fetch_and_process(self, fetch_type="live", from_date=None, to_date=None, lastnews_dt_tm=None):
-        try:
-            if fetch_type == "hist":
-                self.logger.info("📡 Step 1: Fetching Historical announcements...")
-                announcements = await self.bse_client.fetch_hist_announcements(from_date, to_date)
-            else:
-                self.logger.info("📡 Step 1: Fetching Live announcements...")
-                announcements = await self.bse_client.fetch_live_announcements(lastnews_dt_tm)
+# ------------------------ Pipeline Runner ------------------------
+async def run_pipeline_loop(pipeline: BSEAnnouncementPipeline, hist=False):
+    logger = pipeline.logger
 
-            if not announcements:
-                self.logger.warning("⚠️ No announcements fetched.")
-                return
-            
-            if self.maintain_json:
-                await self.maintain_json_file(announcements, data_type="normal", fetch_type=fetch_type)
+    if hist:
+        await is_internet(logger)
+        await pipeline.fetch_and_process(
+            fetch_type="hist",
+            from_date=BSE_INDIRA_HIST_MIN_DATE,
+            to_date=BSE_INDIRA_HIST_MAX_DATE,
+        )
+        logger.info("📚 Historical data fetch completed.")
+        return  
 
-            self.logger.info(f"✅ Fetched {len(announcements)} announcements")
-            self.logger.info("📊 Step 2: Categorizing announcements...")
-            categorized_docs = await self.categorizer.run_formator(announcements)
+    interval_minutes = RUN_INTERVAL_TIME_MIN or 1
+    logger.info(f"🚀 Starting BSE Live Announcements Pipeline | Interval: {interval_minutes} min")
 
-            if not categorized_docs:
-                self.logger.info("⚠️ No docs after filter using company master and assign category")
-                return
-            
-            if self.maintain_json:
-                await self.maintain_json_file(categorized_docs, data_type="filter", fetch_type=fetch_type)
+    lastnews_dt_tm = None
+    iteration = 0
 
-            self.logger.info(f"✅ Categorized {len(categorized_docs)} announcements")
-            self.logger.info("📍 Step 3: Dividing by category and inserting to collections...")
-            await self.divider.divide_and_insert_docs(categorized_docs)
+    while True:
+        await is_internet(logger)
+        iteration += 1
+        logger.info("=" * 70)
+        logger.info(f"⏱️ Iteration {iteration}")
 
-        except Exception as e:
-            self.logger.error(f"❌ Pipeline failed during processing: {e}", exc_info=False)
+        if lastnews_dt_tm:
+            logger.info(f"📅 Fetching announcements since: {lastnews_dt_tm}")
+        else:
+            logger.info("📅 First run — using default window")
 
-    async def run_pipeline(self, hist=False):
-        if hist:
-            await self.is_internet()
-            await self.fetch_and_process(fetch_type="hist", from_date=BSE_INDIRA_HIST_MIN_DATE, to_date=BSE_INDIRA_HIST_MAX_DATE)
+        start_time = datetime.now()
+        run_start_time = start_time.replace(second=0, microsecond=0)
 
-        interval_minutes = RUN_INTERVAL_TIME_MIN or 1
-        self.logger.info(f"🚀 Starting BSE Live Announcements Pipeline | Interval: {interval_minutes} min")
-        lastnews_dt_tm = None
-        iteration = 0
+        await pipeline.fetch_and_process(lastnews_dt_tm=lastnews_dt_tm)
+        duration = (datetime.now() - start_time).seconds
+        logger.info(f"🕒 Cycle completed in {duration} seconds")
 
-        while True:
-            await self.is_internet()
-            iteration += 1
-            self.logger.info("=" * 70)
-            self.logger.info(f"⏱️ Iteration {iteration}")
-
-            if lastnews_dt_tm:
-                self.logger.info(f"📅 Fetching announcements since: {lastnews_dt_tm}")
-            else:
-                self.logger.info("📅 First run — using default window")
-
-            start_time = datetime.now()
-            run_start_time = start_time.replace(second=0, microsecond=0)
-
-            await self.fetch_and_process(lastnews_dt_tm=lastnews_dt_tm)
-            duration = (datetime.now() - start_time).seconds
-            self.logger.info(f"🕒 Cycle completed in {duration} seconds")
-
-            lastnews_dt_tm = run_start_time
-            self.logger.info(f"✅ Next fetch will use: {lastnews_dt_tm.strftime('%d/%m/%Y %H:%M:00')}")
-            self.logger.info(f"💤 Sleeping for {interval_minutes} minutes...\n")
-            await asyncio.sleep(interval_minutes * 60)
-            
-
-    async def is_internet(self) -> bool:
-        test_url = "https://www.google.com/generate_204"
-        while True:
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(test_url, timeout=5) as resp:
-                        if resp.status == 204:
-                            return True
-                        else:
-                            self.logger.warning("⚠ Captive portal detected or unexpected response.")
-            except Exception:
-                self.logger.warning("❌ No internet connection detected.")
-            
-            self.logger.info("💤 Retrying internet check in 15 min ...\n")
-            await asyncio.sleep(15*60)
+        lastnews_dt_tm = run_start_time
+        logger.info(f"✅ Next fetch will use: {lastnews_dt_tm.strftime('%d/%m/%Y %H:%M:00')}")
+        logger.info(f"💤 Sleeping for {interval_minutes} minutes...\n")
+        await asyncio.sleep(interval_minutes * 60)
 
 
+# ------------------------ Entry Point ------------------------
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run BSE Announcement Pipeline")
+    parser.add_argument("--hist", action="store_true", help="Run historical data pipeline (one-time)")
+    args = parser.parse_args()
+
     pipeline = BSEAnnouncementPipeline()
+    logger = pipeline.logger
+
     try:
-        asyncio.run(pipeline.run_pipeline(hist=False))
+        asyncio.run(run_pipeline_loop(pipeline, hist=args.hist))
     except KeyboardInterrupt:
-        pipeline.logger.info("✋ Pipeline stopped by user (KeyboardInterrupt)")
+        logger.info("✋ Pipeline stopped by user (KeyboardInterrupt).")
     except Exception as e:
-        pipeline.logger.error(f"❌ Unhandled error in main loop: {e}", exc_info=False)
+        logger.error(f"❌ Unhandled error in main loop: {e}", exc_info=False)
     finally:
-        pipeline.logger.info("🧹 Exiting BSEAnnouncementPipeline cleanly.")
+        logger.info("🧹 Exiting BSEAnnouncementPipeline cleanly.")

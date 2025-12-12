@@ -2,6 +2,7 @@ from datetime import datetime
 from core.base import Base
 import pandas as pd
 import asyncio
+from pymongo.errors import BulkWriteError
 from config.constants import CATEGORY_MAP
 
 class ReportsDivider(Base):
@@ -14,32 +15,26 @@ class ReportsDivider(Base):
         if not docs:
             self.logger.info(f"⚠️ No docs to insert for {category or collection.name}")
             return
-        
         batch_size = self.mongodb_insert_batch
         total = len(docs)
-        if total <= batch_size:
-            try:
-                res = await collection.insert_many(docs)
-                self.logger.info(f"✅ {len(res.inserted_ids)} docs → {category or collection.name}")
-            except Exception as e:
-                self.logger.error(f"❌ Insert fail → {category or collection.name}: {e}")
-            return
-        
         total_batches = (total + batch_size - 1) // batch_size
         inserted = 0
+        duplicates = 0
         for i in range(0, total, batch_size):
             chunk = docs[i:i + batch_size]
             try:
-                res = await collection.insert_many(chunk)
-                count = len(res.inserted_ids)
-                inserted += count
-                self.logger.info(f"✅ Batch {i//batch_size + 1}/{total_batches} → {count} docs → {category or collection.name}")
-            except Exception as e:
-                self.logger.error(f"❌ Batch {i//batch_size + 1}/{total_batches} → {category or collection.name}: {e}")
-            await asyncio.sleep(2)
-        self.logger.info(f"📦 Done → {inserted}/{total} docs → {category or collection.name}")
-
-
+                res = await collection.insert_many(chunk, ordered=False)
+                inserted += len(res.inserted_ids)
+            except BulkWriteError as e:
+                write_errors = e.details.get("writeErrors", [])
+                duplicates += sum(1 for err in write_errors if err.get("code") == 11000)
+                inserted += e.details.get("nInserted", 0)
+            except Exception:
+                self.logger.warning(f"⚠️ Batch {i//batch_size + 1}/{total_batches} → {category or collection.name}: Exception")
+                continue
+            self.logger.info(f"✅ Batch {i//batch_size + 1}/{total_batches} → Inserted {inserted}/{total} (Skipped {duplicates} dups) → {category or collection.name}")
+            await asyncio.sleep(0.5)
+        self.logger.info(f"📦 Done → Inserted {inserted}/{total} (Skipped {duplicates} duplicates) → {category or collection.name}")
 
     async def structure_report_doc(self, doc: dict):
         try:
@@ -156,7 +151,48 @@ class ReportsDivider(Base):
             self.logger.error(f"❌ format_category_docs error for {category}: {e}")
             return []
         
-    async def divide_and_insert_docs(self, docs):
+
+    async def get_category_existing_report_ids(self, category: str, trade_date: str) -> list:
+        if datetime.strptime(trade_date, "%Y-%m-%d %H:%M:%S").date() >= datetime.now().date():
+            ids = await self.collection_all_reports.distinct(
+                "report_id", {"report_type": category, "dt_tm": {"$gte": trade_date}}
+            )
+        else:
+            ids = {
+                d["report_id"] async for d in self.collection_all_reports.find(
+                    {"dt_tm": {"$gte": trade_date}},
+                    {"_id": 0, "report_id": 1}
+                ).sort("dt_tm", -1)
+                if d.get("report_id")
+            }
+        return list(ids)
+
+    async def all_reports_runner(self, docs, tradedate, all_category_is_general=False):
+        if not docs:
+            return
+        if not all_category_is_general:
+            df = pd.DataFrame(docs)
+            for category, cat_info in CATEGORY_MAP.items():
+                category_existing_report_ids = await self.get_category_existing_report_ids(category, tradedate)
+                df_filtered = df[
+                    (df["category"] == category)
+                    & (~df["news_id"].isin(category_existing_report_ids))
+                ]
+                if df_filtered.empty:
+                    continue
+                existing_report_id_mapping = self.build_existing_counts_map(category_existing_report_ids)
+                short_cat = cat_info.get("short_name", category[:2].upper())
+                structured_docs = await self.format_category_docs(
+                    df_filtered, category, short_cat, existing_report_id_mapping
+                )
+                if structured_docs:
+                    await self.insert_in_batches(
+                        collection=self.collection_all_reports,
+                        docs=structured_docs,
+                        category=category,
+                    )
+
+    async def divide_and_insert_docs(self, docs, tradedate):
         try:
             if not docs:
                 self.logger.info("No docs found for reports_divider")
@@ -170,19 +206,8 @@ class ReportsDivider(Base):
             
             annoucement_docs = df.to_dict(orient="records")
             await self.insert_in_batches(collection=self.collection_all_ann, docs=annoucement_docs)
-            
-            if not all_category_is_general:
-                for category, cat_info in CATEGORY_MAP.items():
-                    df_filtered = df[df["category"] == category]
-                    if df_filtered.empty:
-                        continue
-                    category_existing_report_ids = await self.collection_all_reports.distinct('report_id', {"report_type":category})
-                    existing_report_id_mapping = self.build_existing_counts_map(category_existing_report_ids)
-                    short_cat = cat_info.get("short_name", category[:2].upper())
-                    structured_docs = await self.format_category_docs(df_filtered, category, short_cat, existing_report_id_mapping)
-                    if structured_docs:
-                        await self.insert_in_batches(collection=self.collection_all_reports, docs=structured_docs, category=category)
-                        
+            await self.all_reports_runner(docs=annoucement_docs, tradedate=tradedate, all_category_is_general=all_category_is_general)
+
         except Exception as e:
             self.logger.error(f"❌ process_and_distribute_reports_df failed: {e}")
 
